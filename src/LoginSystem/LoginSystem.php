@@ -73,28 +73,28 @@ class LoginSystem extends PluginBase implements Listener {
         }
     }
 
-    function onJoin(PlayerJoinEvent $G) {
-        $B = $G->getPlayer();
-        $A = strtolower($B->getName());
-        $this->log[$A] = 0;
-        $this->second[$A] = false;
-        $this->pass[$A] = null;
-        $i = $B->getAddress();
-        $d = $B->getClientId();
-        $r = $this->DB("SELECT * FROM player WHERE name=\"$A\"", true);
+    function onJoin(PlayerJoinEvent $event) {
+        $player = $event->getPlayer();
+        $name = strtolower($name->getName());
+        $this->log[$name] = 0;
+        $this->second[$name] = false;
+        $this->pass[$name] = null;
+        $ip = $player->getAddress();
+        $cid = $player->getClientId();
+        $r = $this->DB("SELECT * FROM player WHERE name=\"$name\"", true);
         if (empty($r)) {
-            $B->sendMessage("[LS] §bこのサーバーではログイン認証を行っています\n§f[LS] §bここで遊ぶにはそのままチャットに 好きなパスワード を打って認証をしてください\n§f[LS] §7/registerは不要です");
-            $B->setImmobile(true);
+            $player->sendMessage("[LS] §bこのサーバーではログイン認証を行っています\n§f[LS] §bここで遊ぶにはそのままチャットに 好きなパスワード を打って認証をしてください\n§f[LS] §7/registerは不要です");
+            $player->setImmobile(true);
         } else {
-            if ($r["ip"] == $i && $r["cid"] == $d) {
-                $B->sendMessage("[LS] §aログイン認証がされました");
+            if ($r["ip"] == $ip && $r["cid"] == $cid) {
+                $player->sendMessage("[LS] §aログイン認証がされました");
             } else {
-                $B->sendMessage("[LS] §cあなたの情報が変わったようです\n§f[LS] §bチャットに パスワード を打ってログイン認証をしてください\n§f[LS] §7/loginは不要です");
-                $B->setImmobile(true);
-                $this->log[$A] = 0;
-                $this->second[$A] = false;
-                $this->pass[$A] = null;
-                $this->DB("UPDATE player set data=\"2\" WHERE name=\"$A\"");
+                $player->sendMessage("[LS] §cあなたの情報が変わったようです\n§f[LS] §bチャットに パスワード を打ってログイン認証をしてください\n§f[LS] §7/loginは不要です");
+                $player->setImmobile(true);
+                $this->log[$name] = 0;
+                $this->second[$name] = false;
+                $this->pass[$name] = null;
+                $this->DB("UPDATE player set data=\"2\" WHERE name=\"$name\"");
             }
         }
     }
