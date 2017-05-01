@@ -1,6 +1,6 @@
 <?php 
 
-namespace LS;
+namespace LoginSystem;
 
 use pocketmine\Player;
 use pocketmine\Server;
@@ -22,7 +22,7 @@ use pocketmine\event\block\BlockPlaceEvent;
 use pocketmine\entity\Entity;
 use pocketmine\permission\BanEntry;
 
-class LS extends PluginBase implements Listener {
+class LoginSystem extends PluginBase implements Listener {
 
     public static $instance = null;
 
