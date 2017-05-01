@@ -37,13 +37,13 @@ class LoginSystem extends PluginBase implements Listener {
         Server::getInstance()->getPluginManager()->registerEvents($this, $this);
         $file = $this->getDataFolder() . "player.db";
         if (!file_exists($this->getDataFolder())) @mkdir($this->getDataFolder(), 0744, true);
-        $this->Ban = new Config($this->getDataFolder() . "Ban.yml", Config::YAML);
         if (!file_exists($file)) {
             $this->db = new \SQLite3($file, SQLITE3_OPEN_READWRITE | SQLITE3_OPEN_CREATE);
         } else {
             $this->db = new \SQLite3($file, SQLITE3_OPEN_READWRITE);
         }
         $this->DB("CREATE TABLE IF NOT EXISTS player (name TEXT PRIMARY KEY,pass TEXT,ip TEXT,cid TEXT,data INT)");
+        $this->DB("CREATE TABLE IF NOT EXISTS banlist (cid TEXT PRIMARY KEY,name TEXT,reason TEXT)");
     }
 
     function onDisable() {
@@ -57,7 +57,7 @@ class LoginSystem extends PluginBase implements Listener {
         $ip = $player->getAddress();
         $r = $this->DB("SELECT * FROM player WHERE name=\"$name\"", true);
         $R = $this->DB("SELECT * FROM player WHERE cid=\"$cid\"", true);
-        if ($this->Ban->exists($cid)) {
+        if ($this->isClientBan($cid)) {
             $event->setCancelled();
             $event->setKickMessage("§cあなたの端末はBANされています");
         } elseif (!empty($r)) {
@@ -75,7 +75,7 @@ class LoginSystem extends PluginBase implements Listener {
 
     function onJoin(PlayerJoinEvent $event) {
         $player = $event->getPlayer();
-        $name = strtolower($name->getName());
+        $name = strtolower($player->getName());
         $this->log[$name] = 0;
         $this->second[$name] = false;
         $this->pass[$name] = null;
@@ -108,9 +108,9 @@ class LoginSystem extends PluginBase implements Listener {
                     $r = $this->DB("SELECT cid FROM player WHERE name=\"$name\"", true);
                     $player = Server::getInstance()->getPlayer($name);
                     if (!empty($r)) {
-                        if ($player instanceof Player) $player->close("", "§cあなたの端末をBANしました");
+                        if ($player instanceof Player) $player->kick("§cあなたの端末をBANしました",false);
                         $cid = $r["cid"];
-                        $this->addClientBan($cid, $name);
+                        $this->addClientBan($cid, $name, $reason = isset($args[1]) ? $args[1] : "AdminBan");
                         Server::getInstance()->broadcastMessage("[LS] §c" . $sender->getName() . "が" . $args[0] . "をClientBanしました");
                     } else {
                         $sender->sendMessage("> " . $args[0] . "のデータがありません");
@@ -125,7 +125,7 @@ class LoginSystem extends PluginBase implements Listener {
                     $r = $this->DB("SELECT cid FROM player WHERE name=\"$name\"", true);
                     if (!empty($r)) {
                         $cid = $r["cid"];
-                        if ($this->Ban->exists($cid)) {
+                        if ($this->isClientBan($cid)) {
                             $this->removeClientBan($cid);
                             Server::getInstance()->broadcastMessage("[LS] §e" . $sender->getName() . "が" . $args[0] . "のClientBanを解除しました");
                         } else {
@@ -148,8 +148,10 @@ class LoginSystem extends PluginBase implements Listener {
                         $p = hash('sha256', 'login' . $h . 'system');
                         if ($r["pass"] == $p) {
                             $this->DB("DELETE FROM player WHERE name=\"$name\"");
-                            $sender->close("", "§cログインデータを削除したのでもう一度ログインしなおしてください");
+                            $sender->kick("§cログインデータを削除したのでもう一度ログインしなおしてください",false);
                             $this->getLogger()->info("> " . $name . "がデータを削除しました");
+                        } else {
+                        	$sender->sendMessage("[LS] §cパスワードが違います");
                         }
                     }
                 } else {
@@ -157,7 +159,7 @@ class LoginSystem extends PluginBase implements Listener {
                     $player = Server::getInstance()->getPlayer($name);
                     $r = $this->DB("SELECT name FROM player WHERE name=\"$name\"", true);
                     if (!empty($r)) {
-                        if ($player instanceof Player) $player->close("", "§cログインデータを削除したのでもう一度ログインしなおしてください");
+                        if ($player instanceof Player) $player->kick("§cログインデータを削除したのでもう一度ログインしなおしてください",false);
                         $this->DB("DELETE FROM player WHERE name = \"$name\"");
                         $sender->sendMessage("> " . $name . "のデータを削除しました");
                     } else {
@@ -173,13 +175,13 @@ class LoginSystem extends PluginBase implements Listener {
                     $r = $this->DB("SELECT ip,cid FROM player WHERE name=\"$name\"", true);
                     $player = Server::getInstance()->getPlayer($name);
                     if (!empty($r)) {
-                        if ($player instanceof Player) $player->close("", "§cあなたの端末とIPをBANしました");
+                        if ($player instanceof Player) $player->kick("§cあなたの端末とIPをBANしました",false);
                         $cid = $r["cid"];
-                        $this->addClientBan($cid, $name);
-                        Server::getInstance()->getIPBans()->add(new BanEntry($r["ip"]));
+                        $this->addClientBan($cid, $name, $reason = isset($args[1]) ? $args[1] : "AdminBan");
+                        Server::getInstance()->getIPBans()->add(new BanEntry($ip = ($player instanceof Player) ? $player->getAddress() : $r["ip"]));
                         Server::getInstance()->broadcastMessage("[LS] §c" . $sender->getName() . "が" . $args[0] . "をClientBanとIPBanしました");
                     } else {
-                        $I->sendMessage("> " . $args[0] . "のデータがありません");
+                        $sender->sendMessage("> " . $args[0] . "のデータがありません");
                     }
                 }
                 break;
@@ -188,7 +190,7 @@ class LoginSystem extends PluginBase implements Listener {
 
     function onPlayerCommand(PlayerCommandPreprocessEvent $event) {
         $text = $event->getMessage();
-        $p = explode(" ", $t);
+        $p = explode(" ", $text);
         $s = mb_substr($p[0], 0, 1);
         if ($s != "/") return false;
         $this->Log($event);
@@ -257,7 +259,7 @@ class LoginSystem extends PluginBase implements Listener {
                     $player->sendMessage("[LS] §cパスワードが違います");
                     if ($this->log[$name] >= 10) {
                         $this->addClientBan($cid, $name, "LoginMiss");
-                        $player->close("", "§cあなたの端末をBANしました");
+                        $player->kick("§cあなたの端末をBANしました",false);
                         Server::getInstance()->broadcastMessage("[LS] §cpassを10回以上間違えたので" . $name . "をClientBANしました");
                     }
                 }
@@ -278,9 +280,9 @@ class LoginSystem extends PluginBase implements Listener {
 
     function DB($sql, $return = false) {
         if ($return) {
-            return $this->db->query($s)->fetchArray();
+            return $this->db->query($sql)->fetchArray();
         } else {
-            $this->db->query($s);
+            $this->db->query($sql);
             return true;
         }
     }
@@ -289,15 +291,18 @@ class LoginSystem extends PluginBase implements Listener {
         return self::$instance;
     }
 
+    public function isClientBan($cid) {
+    	$r = $this->DB("SELECT * FROM banlist WHERE cid=\"$cid\"", true);
+    	return (!empty($r));
+    }
+
     public function addClientBan($cid, $name, $reason = "AdminBan") {
-        if ($this->Ban->exists($cid)) return false;
-        $this->Ban->set($cid, $name . ": " . $reason);
-        $this->Ban->save();
+        if ($this->isClientBan($cid)) return false;
+        $this->DB("INSERT OR REPLACE INTO banlist VALUES(\"$cid\",\"$name\",\"$reason\")");
     }
 
     public function removeClientBan($cid) {
-        if (!$this->Ban->exists($cid)) return false;
-        $this->Ban->remove($cid);
-        $this->Ban->save();
+        if (!$this->isClientBan($cid)) return false;
+        $this->DB("DELETE FROM banlist WHERE cid = \"$cid\"");
     }
 }
