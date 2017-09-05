@@ -99,7 +99,7 @@ class LoginSystem extends PluginBase implements Listener {
         }
     }
 
-    function onCommand(CommandSender $sender, Command $command, $label, array $args) {
+    function onCommand(CommandSender $sender, Command $command, string $label, array $args) : bool{
         switch ($command->getName()) {
             case "cban":
                 if (!isset($args[0])) return;
@@ -110,7 +110,7 @@ class LoginSystem extends PluginBase implements Listener {
                     if (!empty($r)) {
                         if ($player instanceof Player) $player->kick("§cあなたの端末をBANしました",false);
                         $cid = $r["cid"];
-                        $this->addClientBan($cid, $name, $reason = isset($args[1]) ? $args[1] : "AdminBan");
+                        $this->addClientBan($cid, $name, $reason = (isset($args[1]) and preg_match("/[^a-zA-Z0-9]/", $args[1])) ? $args[1] : "AdminBan");
                         Server::getInstance()->broadcastMessage("[LS] §c" . $sender->getName() . "が" . $args[0] . "をClientBanしました");
                     } else {
                         $sender->sendMessage("> " . $args[0] . "のデータがありません");
@@ -177,15 +177,16 @@ class LoginSystem extends PluginBase implements Listener {
                     if (!empty($r)) {
                         if ($player instanceof Player) $player->kick("§cあなたの端末とIPをBANしました",false);
                         $cid = $r["cid"];
-                        $this->addClientBan($cid, $name, $reason = isset($args[1]) ? $args[1] : "AdminBan");
+                        $this->addClientBan($cid, $name, $reason = (isset($args[1]) and preg_match("/[^a-zA-Z0-9]/", $args[1])) ? $args[1] : "AdminBan");
                         Server::getInstance()->getIPBans()->add(new BanEntry($ip = ($player instanceof Player) ? $player->getAddress() : $r["ip"]));
                         Server::getInstance()->broadcastMessage("[LS] §c" . $sender->getName() . "が" . $args[0] . "をClientBanとIPBanしました");
                     } else {
                         $sender->sendMessage("> " . $args[0] . "のデータがありません");
                     }
                 }
-                break;
+               	break;
         }
+        return true;
     }
 
     function onPlayerCommand(PlayerCommandPreprocessEvent $event) {
@@ -218,7 +219,6 @@ class LoginSystem extends PluginBase implements Listener {
         $name = strtolower($player->getName());
         $r = $this->DB("SELECT * FROM player WHERE name=\"$name\"", true);
         if (empty($r)) {
-            if (!$event->isCancelled()) $event->setCancelled();
             if (preg_match("/[^a-zA-Z0-9]/", $text)) {
                 $player->sendMessage("[LS] §cパスワードは英数字で設定してください");
             } else {
@@ -242,15 +242,15 @@ class LoginSystem extends PluginBase implements Listener {
                     $player->sendMessage("[LS] §e確認のためにもう一度 パスワード を打ってください");
                 }
             }
+            if (!$event->isCancelled()) $event->setCancelled();
         } else {
             if ($r["data"] == "2") {
-                $event->setCancelled();
                 $ip = $player->getAddress();
                 $cid = $player->getClientId();
-                $h = MD5($s);
+                $h = MD5($text);
                 $p = hash('sha256', 'login' . $h . 'system');
                 if ($r["pass"] == $p) {
-                    $this->DB("UPDATE player set ip=\"$ip\",cid=\"$cid\",data=\"1\"WHERE name=\"$name\"");
+                    $this->DB("UPDATE player set ip=\"$ip\",cid=\"$cid\",data=\"1\" WHERE name=\"$name\"");
                     $player->sendMessage("[LS] §aパスワードで認証されました");
                     $this->log[$name] = 0;
                     $player->setImmobile(false);
@@ -263,6 +263,7 @@ class LoginSystem extends PluginBase implements Listener {
                         Server::getInstance()->broadcastMessage("[LS] §cpassを10回以上間違えたので" . $name . "をClientBANしました");
                     }
                 }
+                if (!$event->isCancelled()) $event->setCancelled();
             }
         }
     }
@@ -291,7 +292,23 @@ class LoginSystem extends PluginBase implements Listener {
         return self::$instance;
     }
 
-    public function isClientBan($cid) {
+    public function existsAccount($name) : bool{
+        $name = strtolower($name);
+        $r = $this->DB("SELECT * FROM player WHERE name=\"$name\"", true);
+        return !empty($r);
+    }
+
+    public function isSuccessedLogin ($name) : bool{
+        $name = strtolower($name);
+        if ($this->existsAccount($name)) {
+            $r = $this->DB("SELECT data FROM player WHERE name=\"$name\"", true);
+            return $value = ($r["data"] == "2") ? false : true;
+        }else{
+            return false;
+        }
+    }
+
+    public function isClientBan($cid) : bool{
     	$r = $this->DB("SELECT * FROM banlist WHERE cid=\"$cid\"", true);
     	return (!empty($r));
     }

@@ -1,6 +1,6 @@
 name: LoginSystem
 main: LoginSystem\LoginSystem
-version: 5.9.1
+version: 5.9.5
 api: [1.0.0,2.0.0,3.0.0]
 load: POSTWORLD
 author: tukikage7127
