@@ -1,27 +1,43 @@
 name: LoginSystem
 main: LoginSystem\LoginSystem
-version: 5.9.5
+version: 6.0.1
 api: [1.0.0,2.0.0,3.0.0]
 load: POSTWORLD
 author: tukikage7127
 description: this is the LoginSystem
 commands:
- cban:
+ lsystem:
   usage:
-  description: "ClientBanを実行する"
-  permission: cban.command
+  description: "LoginSystemのコマンド"
+  permission: lsystem.command
+ register:
+  usage:
+  description: "アカウント登録"
+ login:
+  usage:
+  description: "ログイン認証"
  unregister:
   usage:
-  description: "ログインデータを削除する"
+  description: "アカウント削除"
+ cban:
+  usage:
+  description: "ClientBanの実行"
+  permission: cban.command
  cpardon:
   usage:
-  description: "ClientBanを解除する"
+  description: "ClientBanの解除"
   permission: cpardon.command
  icban:
   usage:
-  description: "ClientBanとIPBanを実行する"
+  description: "IP&ClientBanの実行"
   permission: icban.command
 permissions:
+ lsystem:
+  default: op
+  description: "Allows using all the LoginSystem things"
+ lsystem.command:
+  default: op
+  description: "Allows using all the LoginSystem commands"
  cban:
   default: op
   description: "Allows using all the LoginSystem things"
@@ -29,8 +45,8 @@ permissions:
   default: op
   description: "Allows using all the LoginSystem commands"
  cpardon:
-   default: op
-   description: "Allows using all the LoginSystem things"
+  default: op
+  description: "Allows using all the LoginSystem things"
  cpardon.command:
   default: op
   description: "Allows using all the LoginSystem commands"

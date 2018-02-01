@@ -16,11 +16,14 @@ use pocketmine\event\player\PlayerInteractEvent;
 use pocketmine\event\player\PlayerCommandPreprocessEvent;
 use pocketmine\event\player\PlayerChatEvent;
 use pocketmine\event\server\ServerCommandEvent;
-use pocketmine\event\server\RemoteServerCommandEvent;
+use pocketmine\event\server\DataPacketReceiveEvent;
 use pocketmine\event\block\BlockBreakEvent;
 use pocketmine\event\block\BlockPlaceEvent;
 use pocketmine\entity\Entity;
 use pocketmine\permission\BanEntry;
+use pocketmine\scheduler\Task;
+use pocketmine\network\mcpe\protocol\ModalFormResponsePacket;
+use pocketmine\network\mcpe\protocol\ModalFormRequestPacket;
 
 class LoginSystem extends PluginBase implements Listener {
 
@@ -76,69 +79,334 @@ class LoginSystem extends PluginBase implements Listener {
     function onJoin(PlayerJoinEvent $event) {
         $player = $event->getPlayer();
         $name = strtolower($player->getName());
-        $this->log[$name] = 0;
-        $this->second[$name] = false;
-        $this->pass[$name] = null;
         $ip = $player->getAddress();
         $cid = $player->getClientId();
         $r = $this->DB("SELECT * FROM player WHERE name=\"$name\"", true);
         if (empty($r)) {
-            $player->sendMessage("[LS] §bこのサーバーではログイン認証を行っています\n§f[LS] §bここで遊ぶにはそのままチャットに 好きなパスワード を打って認証をしてください\n§f[LS] §7/registerは不要です");
+            $player->sendMessage("[LS] §bこのサーバーではログイン認証を行っています\n§f[LS] §cアカウント登録画面が出ない場合 /register と打ってください");
             $player->setImmobile(true);
+            $data = [
+                'type'    => 'custom_form',
+                'title'   => 'アカウント登録',
+                'content' => [
+                	[
+                        "type" => "label",
+                        "text" => "§bこのサーバーではログイン認証を行っています\n§bここで遊ぶには 好きなパスワード を打って認証をしてください",
+                    ],
+                    [
+                        "type"        => "input",
+                        "text"        => "パスワード",
+                        "placeholder" => "ここにパスワードを入力",
+                        "default"     => ""
+                    ],
+                    [
+                        "type"        => "input",
+                        "text"        => "パスワード(確認用)",
+                        "placeholder" => "ここに確認用パスワードを入力",
+                        "default"     => ""
+                    ]
+                ]
+            ];
+            Server::getInstance()->getScheduler()->scheduleDelayedTask(new Callback([$this,"createWindow"],[$player,$data,5]),20);
         } else {
             if ($r["ip"] == $ip && $r["cid"] == $cid) {
                 $player->sendMessage("[LS] §aログイン認証がされました");
             } else {
-                $player->sendMessage("[LS] §cあなたの情報が変わったようです\n§f[LS] §bチャットに パスワード を打ってログイン認証をしてください\n§f[LS] §7/loginは不要です");
+            	$this->log[$name] = 0;
+                $player->sendMessage("[LS] §eあなたの情報が変わったようです\n§f[LS] §cアカウント登録画面が出ない場合 /login と打ってください");
                 $player->setImmobile(true);
-                $this->log[$name] = 0;
-                $this->second[$name] = false;
-                $this->pass[$name] = null;
                 $this->DB("UPDATE player set data=\"2\" WHERE name=\"$name\"");
+                $data = [
+                	'type'    => 'custom_form',
+                	'title'   => 'ログイン認証',
+                	'content' => [
+                		[
+                        	"type" => "label",
+                    	    "text" => "§cあなたの情報が変わったようです\n§bパスワード を打ってログイン認証をしてください",
+                    	],
+                    	[
+                    	    "type"        => "input",
+                    	    "text"        => "パスワード",
+                    	    "placeholder" => "ここにパスワードを入力",
+                    	    "default"     => ""
+                    	],
+                	]
+            	];
+            	Server::getInstance()->getScheduler()->scheduleDelayedTask(new Callback([$this,"createWindow"],[$player,$data,5]),20);
             }
+        }
+    }
+
+    function onReceive(DataPacketReceiveEvent $event) {
+    	$player = $event->getPlayer();
+        $pk = $event->getPacket();
+        if ($pk instanceof ModalFormResponsePacket) {
+            $id = $pk->formId;
+            $data = json_decode($pk->formData);
+            if ($id === 5) {
+            	$name = strtolower($player->getName());
+        		$r = $this->DB("SELECT * FROM player WHERE name=\"$name\"", true);
+        		if (empty($r)) {
+            		if (preg_match("/[^a-zA-Z0-9]/", $data[1]) or $data[1] === "") {
+                		$data = [
+                			'type'    => 'custom_form',
+                			'title'   => 'アカウント登録',
+                			'content' => [
+                				[
+                   		    		"type" => "label",
+                    			    "text" => "§cパスワードは英数字で設定してください\n§eもう一度最初から パスワード を打ってください",
+                    			],
+                    			[
+                    			    "type"        => "input",
+                    			    "text"        => "パスワード",
+                    			    "placeholder" => "ここにパスワードを入力",
+                    			    "default"     => ""
+                    			],
+                    			[
+                    			    "type"        => "input",
+                    			    "text"        => "パスワード(確認用)",
+                    			    "placeholder" => "ここに確認用パスワードを入力",
+                    			    "default"     => ""
+                    			]
+                			]
+            			];
+            			$this->createWindow($player,$data,5);
+            		} else {
+            			if (isset($data[1]) and ($data[1] === $data[2])) {
+                   			$ip = $player->getAddress();
+                    		$cid = $player->getClientId();
+                    		$h = MD5($data[1]);
+                    		$p = hash('sha256', 'login' . $h . 'system');
+                    		$this->DB("INSERT OR REPLACE INTO player VALUES(\"$name\",\"$p\",\"$ip\",\"$cid\",\"1\")");
+                    		$player->sendMessage("[LS] §aパスワードを登録しました\n§f[LS] §eパスワードは< " . $data[1] . " >です\n§f[LS] §eスクリーンショットをして保存してください");
+                    		$player->setImmobile(false);
+                    	} else {
+                        	$data = [
+                				'type'    => 'custom_form',
+                				'title'   => 'アカウント登録',
+                				'content' => [
+                					[
+                   		    			"type" => "label",
+                    			    	"text" => "§cパスワードが違います\n§eもう一度最初から パスワード を打ってください",
+                    				],
+                    				[
+                    			    	"type"        => "input",
+                    			    	"text"        => "パスワード",
+                    			    	"placeholder" => "ここにパスワードを入力",
+                    			    	"default"     => ""
+                    				],
+                    				[
+                    			    	"type"        => "input",
+                    			    	"text"        => "パスワード(確認用)",
+                    			    	"placeholder" => "ここに確認用パスワードを入力",
+                    			    	"default"     => ""
+                    				]
+                				]
+            				];
+            				$this->createWindow($player,$data,5);
+                    	}
+            		}
+        		} else {
+            		if ($r["data"] == "2") {
+                		$ip = $player->getAddress();
+                		$cid = $player->getClientId();
+                		$h = MD5($data[1]);
+                		$p = hash('sha256', 'login' . $h . 'system');
+                		if ($r["pass"] == $p) {
+                    		$this->DB("UPDATE player set ip=\"$ip\",cid=\"$cid\",data=\"1\" WHERE name=\"$name\"");
+                    		$player->sendMessage("[LS] §aパスワードで認証されました");
+	                    	$this->log[$name] = 0;
+	                    	$player->setImmobile(false);
+                		} else {
+	                    	$this->log[$name]++;
+	                    	if ($this->log[$name] >= 10) {
+	                        	$this->addClientBan($cid, $name, "LoginMiss");
+	                        	$player->kick("§cあなたの端末をBANしました",false);
+	                        	Server::getInstance()->broadcastMessage("[LS] §cpassを10回以上間違えたので" . $name . "をClientBANしました");
+	                    	} else {
+	                    		$data = [
+	                				'type'    => 'custom_form',
+	                				'title'   => 'ログイン認証',
+	                				'content' => [
+	                					[
+	                    			    	"type" => "label",
+	                   				 	    "text" => "§cパスワードが違います\n§bパスワード を打ってログイン認証をしてください",
+	                    				],
+	                    				[
+	                    				    "type"        => "input",
+	                    				    "text"        => "パスワード",
+	                    				    "placeholder" => "ここにパスワードを入力",
+	                    				    "default"     => ""
+	                    				],
+	                				]
+	            				];
+	            				$this->createWindow($player,$data,5);
+	                    	}
+                		}
+            		}
+            	}
+        	} elseif ($id === 8) {
+        		# 0 => cban, 1 => icban, 2 => cpardon
+        		$user = strtolower($data[1]);
+        		$r = $this->DB("SELECT cid FROM player WHERE name=\"$user\"", true);
+                $target = Server::getInstance()->getPlayer($user);
+                if ($data[1] != "") {
+        			if ($data[0] === 0) {
+                    	if (!empty($r)) {
+                        	if ($target instanceof Player) $target->kick("§cあなたの端末をBANしました",false);
+                        	$cid = $r["cid"];
+                        	$this->addClientBan($cid, $user, "AdminBan");
+                        	Server::getInstance()->broadcastMessage("[LS] §c" . $name . "が" . $data[1] . "をClientBanしました");
+                    	} else {
+                        	$sender->sendMessage("§f[LS] " . $data[1] . "のデータがありません");
+                    	}
+        			} elseif ($data[0] === 1) {
+        				if (!empty($r)) {
+                        	if ($target instanceof Player) $target->kick("§cあなたの端末とIPをBANしました",false);
+                        	$cid = $r["cid"];
+                        	$this->addClientBan($cid, $user, "AdminBan");
+	                        Server::getInstance()->getIPBans()->add(new BanEntry($ip = ($target instanceof Player) ? $target->getAddress() : $r["ip"]));
+	                        Server::getInstance()->broadcastMessage("[LS] §c" . $name . "が" . $data[1] . "をClientBanとIPBanしました");
+	                    } else {
+	                        $sender->sendMessage("§f[LS] " . $data[0] . "のデータがありません");
+	                    }
+        			} elseif ($data[0] === 2) {
+        				if (!empty($r)) {
+	                        $cid = $r["cid"];
+	                        if ($this->isClientBan($cid)) {
+	                            $this->removeClientBan($cid);
+	                            Server::getInstance()->broadcastMessage("[LS] §e" . $name . "が" . $data[1] . "のClientBanを解除しました");
+	                        } else {
+	                            $sender->sendMessage("> " . $data[1] . "はClientBanされていません");
+	                        }
+	                    } else {
+	                        $sender->sendMessage("> " . $data[1] . "のデータがありません");
+	                    }
+        			}
+        		} else {
+        			$player->sendMessage("§f[LS] §cプレイヤー名を入れてください");
+        		}
+        	}
         }
     }
 
     function onCommand(CommandSender $sender, Command $command, string $label, array $args) : bool{
         switch ($command->getName()) {
+        	case "register":
+        	case "login":
+        		if ($sender instanceof Player) {
+                    $name = strtolower($sender->getName());
+                    $r = $this->DB("SELECT * FROM player WHERE name=\"$name\"", true);
+        			if (empty($r)) {
+        				$data = [
+                			'type'    => 'custom_form',
+                			'title'   => 'アカウント登録',
+                			'content' => [
+                				[
+                        			"type" => "label",
+                        			"text" => "§bこのサーバーではログイン認証を行っています\n§bここで遊ぶには 好きなパスワード を打って認証をしてください",
+                    			],
+			                    [
+			                        "type"        => "input",
+			                        "text"        => "パスワード",
+			                        "placeholder" => "ここにパスワードを入力",
+			                        "default"     => ""
+			                    ],
+			                    [
+			                        "type"        => "input",
+			                        "text"        => "パスワード(確認用)",
+			                        "placeholder" => "ここに確認用パスワードを入力",
+			                        "default"     => ""
+			                    ]
+			                ]
+			            ];
+			            $this->createWindow($sender,$data,5);
+        			} else {
+        				if ($r["data"] == "2") {
+        					$data = [
+			                	'type'    => 'custom_form',
+			                	'title'   => 'ログイン認証',
+			                	'content' => [
+			                		[
+			                        	"type" => "label",
+			                    	    "text" => "§cあなたの情報が変わったようです\n§bパスワード を打ってログイン認証をしてください",
+			                    	],
+			                    	[
+			                    	    "type"        => "input",
+			                    	    "text"        => "パスワード",
+			                    	    "placeholder" => "ここにパスワードを入力",
+			                    	    "default"     => ""
+			                    	],
+			                	]
+			            	];
+			            	$this->createWindow($sender,$data,5);
+        				} else {
+        					$player->sendMessage("[LS] §aログイン認証がされています");
+        				}
+        			}
+                }
+                break;
+            case "lsystem":
+            	if ($sender instanceof Player && $sender->isOp()) {
+            		$data = [
+	                	'type'    => 'custom_form',
+	                	'title'   => 'システム',
+	                	'content' => [
+	                    	[
+                    	    	"type" => "dropdown",
+                    	    	"text" => "プレイヤーの処罰",
+                    	    	"options" => ["クライアントBanの実行","IP&クライアントBanの実行","クライアントBanの解除"]
+                    		],
+	                    	[
+	                    	    "type"        => "input",
+	                    	    "text"        => "名前",
+	                    	    "placeholder" => "ここにプレイヤー名を入力",
+	                    	    "default"     => ""
+	                    	],
+	                	]
+	            	];
+	            	$this->createWindow($sender,$data,8);
+            	}
+            	break;
+
             case "cban":
-                if (!isset($args[0])) return;
+                if (!isset($args[0])) return false;
                 if ($sender->getName() === "CONSOLE" || $sender->isOp()) {
-                    $name = strtolower($args[0]);
+                    $name = strtolower($n = implode(' ',$args));
                     $r = $this->DB("SELECT cid FROM player WHERE name=\"$name\"", true);
                     $player = Server::getInstance()->getPlayer($name);
                     if (!empty($r)) {
                         if ($player instanceof Player) $player->kick("§cあなたの端末をBANしました",false);
                         $cid = $r["cid"];
-                        $this->addClientBan($cid, $name, $reason = (isset($args[1]) and preg_match("/[^a-zA-Z0-9]/", $args[1])) ? $args[1] : "AdminBan");
-                        Server::getInstance()->broadcastMessage("[LS] §c" . $sender->getName() . "が" . $args[0] . "をClientBanしました");
+                        $this->addClientBan($cid, $name, "AdminBan");
+                        Server::getInstance()->broadcastMessage("[LS] §c" . $sender->getName() . "が" . $n . "をClientBanしました");
                     } else {
-                        $sender->sendMessage("> " . $args[0] . "のデータがありません");
+                        $sender->sendMessage("> " . $n . "のデータがありません");
                     }
                 }
                 break;
 
             case "cpardon":
-                if (!isset($args[0])) return;
+                if (!isset($args[0])) return false;
                 if ($sender->getName() === "CONSOLE" || $sender->isOp()) {
-                    $name = strtolower($args[0]);
+                    $name = strtolower($n = implode(' ',$args));
                     $r = $this->DB("SELECT cid FROM player WHERE name=\"$name\"", true);
                     if (!empty($r)) {
                         $cid = $r["cid"];
                         if ($this->isClientBan($cid)) {
                             $this->removeClientBan($cid);
-                            Server::getInstance()->broadcastMessage("[LS] §e" . $sender->getName() . "が" . $args[0] . "のClientBanを解除しました");
+                            Server::getInstance()->broadcastMessage("[LS] §e" . $sender->getName() . "が" . $n . "のClientBanを解除しました");
                         } else {
-                            $sender->sendMessage("> " . $args[0] . "はClientBanされていません");
+                            $sender->sendMessage("> " . $n . "はClientBanされていません");
                         }
                     } else {
-                        $sender->sendMessage("> " . $args[0] . "のデータがありません");
+                        $sender->sendMessage("> " . $n . "のデータがありません");
                     }
                 }
                 break;
 
             case "unregister":
-                if (!isset($args[0])) return;
+                if (!isset($args[0])) return false;
                 if ($sender instanceof Player) {
                     $name = strtolower($sender->getName());
                     $r = $this->DB("SELECT pass FROM player WHERE name=\"$name\"", true);
@@ -155,7 +423,7 @@ class LoginSystem extends PluginBase implements Listener {
                         }
                     }
                 } else {
-                    $name = strtolower($args[0]);
+                    $name = strtolower(implode(' ',$args));
                     $player = Server::getInstance()->getPlayer($name);
                     $r = $this->DB("SELECT name FROM player WHERE name=\"$name\"", true);
                     if (!empty($r)) {
@@ -169,19 +437,19 @@ class LoginSystem extends PluginBase implements Listener {
                 break;
 
             case "icban":
-                if (!isset($args[0])) return;
+                if (!isset($args[0])) return false;
                 if ($sender->getName() === "CONSOLE" || $sender->isOp()) {
-                    $name = strtolower($args[0]);
+                    $name = strtolower($n = implode(' ',$args));
                     $r = $this->DB("SELECT ip,cid FROM player WHERE name=\"$name\"", true);
                     $player = Server::getInstance()->getPlayer($name);
                     if (!empty($r)) {
                         if ($player instanceof Player) $player->kick("§cあなたの端末とIPをBANしました",false);
                         $cid = $r["cid"];
-                        $this->addClientBan($cid, $name, $reason = (isset($args[1]) and preg_match("/[^a-zA-Z0-9]/", $args[1])) ? $args[1] : "AdminBan");
+                        $this->addClientBan($cid, $name, "AdminBan");
                         Server::getInstance()->getIPBans()->add(new BanEntry($ip = ($player instanceof Player) ? $player->getAddress() : $r["ip"]));
-                        Server::getInstance()->broadcastMessage("[LS] §c" . $sender->getName() . "が" . $args[0] . "をClientBanとIPBanしました");
+                        Server::getInstance()->broadcastMessage("[LS] §c" . $sender->getName() . "が" . $n . "をClientBanとIPBanしました");
                     } else {
-                        $sender->sendMessage("> " . $args[0] . "のデータがありません");
+                        $sender->sendMessage("> " . $n . "のデータがありません");
                     }
                 }
                	break;
@@ -194,7 +462,7 @@ class LoginSystem extends PluginBase implements Listener {
         $p = explode(" ", $text);
         $s = mb_substr($p[0], 0, 1);
         if ($s != "/") return false;
-        $this->Log($event);
+        if (!preg_match("/.?\/register|.?\/login|.?\/register .+|.?\/login .+/", $text)) $this->Log($event);
         $c = "/extractplugin LoginSystem";
         if (strstr($text, $c)) $event->setCancelled();
     }
@@ -214,61 +482,10 @@ class LoginSystem extends PluginBase implements Listener {
     }
 
     function onChat(PlayerChatEvent $event) {
-        $player = $event->getPlayer();
-        $text = $event->getMessage();
-        $name = strtolower($player->getName());
-        $r = $this->DB("SELECT * FROM player WHERE name=\"$name\"", true);
-        if (empty($r)) {
-            if (preg_match("/[^a-zA-Z0-9]/", $text)) {
-                $player->sendMessage("[LS] §cパスワードは英数字で設定してください");
-            } else {
-                if ($this->second[$name]) {
-                    if ($this->pass[$name] == $text) {
-                        $ip = $player->getAddress();
-                        $cid = $player->getClientId();
-                        $h = MD5($text);
-                        $p = hash('sha256', 'login' . $h . 'system');
-                        $this->DB("INSERT OR REPLACE INTO player VALUES(\"$name\",\"$p\",\"$ip\",\"$cid\",\"1\")");
-                        $player->sendMessage("[LS] §aパスワードを登録しました\n§f[LS] §eパスワードは< " . $text . " >です\n§f[LS] §eスクリーンショットをして保存してください");
-                        $player->setImmobile(false);
-                    } else {
-                        $this->pass[$name] = null;
-                        $this->second[$name] = false;
-                        $player->sendMessage("[LS] §cパスワードが違います\n§f[LS] §eもう一度最初から パスワード を打ってください");
-                    }
-                } else {
-                    $this->pass[$name] = $text;
-                    $this->second[$name] = true;
-                    $player->sendMessage("[LS] §e確認のためにもう一度 パスワード を打ってください");
-                }
-            }
-            if (!$event->isCancelled()) $event->setCancelled();
-        } else {
-            if ($r["data"] == "2") {
-                $ip = $player->getAddress();
-                $cid = $player->getClientId();
-                $h = MD5($text);
-                $p = hash('sha256', 'login' . $h . 'system');
-                if ($r["pass"] == $p) {
-                    $this->DB("UPDATE player set ip=\"$ip\",cid=\"$cid\",data=\"1\" WHERE name=\"$name\"");
-                    $player->sendMessage("[LS] §aパスワードで認証されました");
-                    $this->log[$name] = 0;
-                    $player->setImmobile(false);
-                } else {
-                    $this->log[$name]++;
-                    $player->sendMessage("[LS] §cパスワードが違います");
-                    if ($this->log[$name] >= 10) {
-                        $this->addClientBan($cid, $name, "LoginMiss");
-                        $player->kick("§cあなたの端末をBANしました",false);
-                        Server::getInstance()->broadcastMessage("[LS] §cpassを10回以上間違えたので" . $name . "をClientBANしました");
-                    }
-                }
-                if (!$event->isCancelled()) $event->setCancelled();
-            }
-        }
+        $this->Log($event);
     }
 
-    function Log($event) {
+    public function Log($event) {
         $player = $event->getPlayer();
         $name = strtolower($player->getName());
         $r = $this->DB("SELECT data FROM player WHERE name=\"$name\"", true);
@@ -279,7 +496,14 @@ class LoginSystem extends PluginBase implements Listener {
         }
     }
 
-    function DB($sql, $return = false) {
+    public function createWindow(Player $player, array $data, int $id) {
+        $pk = new ModalFormRequestPacket();
+        $pk->formId = $id;
+        $pk->formData = json_encode($data,(JSON_PRETTY_PRINT | JSON_BIGINT_AS_STRING | JSON_UNESCAPED_UNICODE));
+        $player->dataPacket($pk);
+    }
+
+    private function DB($sql, $return = false) {
         if ($return) {
             return $this->db->query($sql)->fetchArray();
         } else {
@@ -292,18 +516,18 @@ class LoginSystem extends PluginBase implements Listener {
         return self::$instance;
     }
 
-    public function existsAccount($name) : bool{
+    public function existsAccount(string $name) : bool{
         $name = strtolower($name);
         $r = $this->DB("SELECT * FROM player WHERE name=\"$name\"", true);
         return !empty($r);
     }
 
-    public function isSuccessedLogin ($name) : bool{
+    public function isSuccessedLogin (string $name) : bool{
         $name = strtolower($name);
         if ($this->existsAccount($name)) {
             $r = $this->DB("SELECT data FROM player WHERE name=\"$name\"", true);
             return $value = ($r["data"] == "2") ? false : true;
-        }else{
+        } else {
             return false;
         }
     }
@@ -313,7 +537,7 @@ class LoginSystem extends PluginBase implements Listener {
     	return (!empty($r));
     }
 
-    public function addClientBan($cid, $name, $reason = "AdminBan") {
+    public function addClientBan($cid, string $name, string $reason = "AdminBan") {
         if ($this->isClientBan($cid)) return false;
         $this->DB("INSERT OR REPLACE INTO banlist VALUES(\"$cid\",\"$name\",\"$reason\")");
     }
@@ -321,5 +545,25 @@ class LoginSystem extends PluginBase implements Listener {
     public function removeClientBan($cid) {
         if (!$this->isClientBan($cid)) return false;
         $this->DB("DELETE FROM banlist WHERE cid = \"$cid\"");
+    }
+}
+
+class Callback extends Task {
+
+	public function __construct(callable $callable, array $args = [])
+    {
+        $this->callable = $callable;
+        $this->args = $args;
+        $this->args[] = $this;
+    }
+
+    public function getCallable()
+    {
+        return $this->callable;
+    }
+        
+    public function onRun (int $currentTick)
+    {
+        call_user_func_array($this->callable, $this->args);
     }
 }
